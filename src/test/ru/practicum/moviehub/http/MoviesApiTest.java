@@ -1,7 +1,6 @@
 package ru.practicum.moviehub.http;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterAll;
@@ -107,5 +106,43 @@ public class MoviesApiTest {
         assertEquals(2, secondMovie.get("id").getAsInt());
         assertEquals("Хакеры", secondMovie.get("title").getAsString(), "Название первого фильма должно быть Хакеры");
         assertEquals(1995, secondMovie.get("year").getAsInt(), "Год второго фильма должен быть 1995");
+    }
+
+    @Test
+    void postMovies_whenValidMovie_returnsCreatedMovie() throws Exception {
+        String requestBody = """
+                {
+                  "title": "Метрополис",
+                  "year": 1927
+                }
+                """;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies"))
+                .header("Content-Type", "application/json; charset=UTF-8")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(201, response.statusCode(), "POST /movies должен вернуть 201");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Content-Type должен содержать формат данных и кодировку");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject movie = JsonParser.parseString(body).getAsJsonObject();
+        assertEquals(1, store.getAllMovies().size(), "Фильм добавился в хранилище, фильмов в нём 1");
+
+        assertEquals(1, movie.get("id").getAsInt(), "ID созданного фильма должен быть 1");
+        assertEquals("Метрополис", movie.get("title").getAsString(), "Название созданного фильма должно быть Метрополис");
+        assertEquals(1927, movie.get("year").getAsInt(), "Год созданного фильма должен быть 1927");
     }
 }
