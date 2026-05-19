@@ -36,4 +36,16 @@ public class MoviesStore {
         moviesById.clear();
         nextId = 1;
     }
+
+    public List<Movie> getMoviesByYear(int year) {
+        List<Movie> result = new ArrayList<>();
+
+        for (Movie movie : moviesById.values()) {
+            if (movie.getYear() == year) {
+                result.add(movie);
+            }
+        }
+
+        return result;
+    }
 }

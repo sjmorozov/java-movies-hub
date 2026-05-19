@@ -1,5 +1,6 @@
 package ru.practicum.moviehub.http;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import ru.practicum.moviehub.model.Movie;
 import ru.practicum.moviehub.store.MoviesStore;
 
 import java.net.URI;
@@ -16,6 +18,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +30,7 @@ public class MoviesApiTest {
     private static MoviesServer server;
     private static HttpClient client;
     private static MoviesStore store;
+    private static Gson gson;
 
     @BeforeAll
     static void beforeAll() {
@@ -35,6 +39,7 @@ public class MoviesApiTest {
         client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
+        gson = new Gson();
         server.start();
     }
 
@@ -69,6 +74,11 @@ public class MoviesApiTest {
         String body = resp.body().trim();
         assertTrue(body.startsWith("[") && body.endsWith("]"),
                 "Ожидается JSON-массив");
+
+        List<Movie> movies = gson.fromJson(body, new ListOfMoviesTypeToken().getType());
+
+        assertEquals(0, movies.size(),
+                "Список фильмов должен быть пустым");
     }
 
     @Test
@@ -95,18 +105,23 @@ public class MoviesApiTest {
         assertTrue(body.startsWith("[") && body.endsWith("]"),
                 "Ожидается JSON-массив");
 
-        JsonArray moviesArray = JsonParser.parseString(body).getAsJsonArray();
-        assertEquals(2, moviesArray.size(), "Количество фильмов должно быть 2");
+        List<Movie> movies = gson.fromJson(body, new ListOfMoviesTypeToken().getType());
 
-        JsonObject firstMovie = moviesArray.get(0).getAsJsonObject();
-        assertEquals(1, firstMovie.get("id").getAsInt());
-        assertEquals("Прибытие поезда", firstMovie.get("title").getAsString(), "Название первого фильма должно быть Прибытие поезда");
-        assertEquals(1896, firstMovie.get("year").getAsInt(), "Год первого фильма должен быть 1896");
+        assertEquals(2, movies.size(), "Количество фильмов должно быть 2");
 
-        JsonObject secondMovie = moviesArray.get(1).getAsJsonObject();
-        assertEquals(2, secondMovie.get("id").getAsInt());
-        assertEquals("Хакеры", secondMovie.get("title").getAsString(), "Название первого фильма должно быть Хакеры");
-        assertEquals(1995, secondMovie.get("year").getAsInt(), "Год второго фильма должен быть 1995");
+        Movie firstMovie = movies.get(0);
+        assertEquals(1, firstMovie.getId(), "id первого фильма должен быть 1");
+        assertEquals("Прибытие поезда", firstMovie.getTitle(),
+                "Название первого фильма должно быть Прибытие поезда");
+        assertEquals(1896, firstMovie.getYear(),
+                "Год первого фильма должен быть 1896");
+
+        Movie secondMovie = movies.get(1);
+        assertEquals(2, secondMovie.getId(), "id второго фильма должен быть 2");
+        assertEquals("Хакеры", secondMovie.getTitle(),
+                "Название второго фильма должно быть Хакеры");
+        assertEquals(1995, secondMovie.getYear(),
+                "Год второго фильма должен быть 1995");
     }
 
     @Test
@@ -461,5 +476,242 @@ public class MoviesApiTest {
 
         assertEquals("Некорректный id фильма", errorResponse.get("error").getAsString(),
                 "Поле error должно содержать сообщение о некорректном id");
+    }
+
+    @Test
+    void deleteMovieById_whenMovieExists_returnsNoContent() throws Exception {
+        store.addMovie("Метрополис", 1927);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies/1"))
+                .DELETE()
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(204, response.statusCode(),
+                "DELETE /movies/{id} для существующего фильма должен вернуть 204");
+
+        assertEquals(0, store.getAllMovies().size(),
+                "Фильм должен быть удалён из хранилища");
+    }
+
+    @Test
+    void deleteMovieById_whenMovieDoesNotExist_returnsNotFound() throws Exception {
+        store.addMovie("Метрополис", 1927);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies/999"))
+                .DELETE()
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(404, response.statusCode(),
+                "DELETE /movies/{id} для несуществующего фильма должен вернуть 404");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Ответ с ошибкой должен быть в формате JSON");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject errorResponse = JsonParser.parseString(body).getAsJsonObject();
+
+        assertEquals("Фильм не найден", errorResponse.get("error").getAsString(),
+                "Поле error должно содержать сообщение, что фильм не найден");
+
+        assertEquals(1, store.getAllMovies().size(),
+                "Несуществующий фильм не удалён, существующий фильм должен остаться");
+    }
+
+    @Test
+    void deleteMovieById_whenIdIsNotNumber_returnsBadRequest() throws Exception {
+        store.addMovie("Метрополис", 1927);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies/abc"))
+                .DELETE()
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(400, response.statusCode(),
+                "DELETE /movies/{id} с некорректным id должен вернуть 400");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Ответ с ошибкой должен быть в формате JSON");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject errorResponse = JsonParser.parseString(body).getAsJsonObject();
+
+        assertEquals("Некорректный id фильма", errorResponse.get("error").getAsString(),
+                "Поле error должно содержать сообщение о некорректном id");
+
+        assertEquals(1, store.getAllMovies().size(),
+                "Фильм не должен быть удалён при некорректном id");
+    }
+
+    @Test
+    void getMovies_whenYearQueryIsValid_returnsMoviesByYear() throws Exception {
+        store.addMovie("Хакеры", 1995);
+        store.addMovie("Схватка", 1995);
+        store.addMovie("Метрополис", 1927);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies?year=1995"))
+                .GET()
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(200, response.statusCode(),
+                "GET /movies?year=YYYY должен вернуть 200");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Content-Type должен содержать формат данных и кодировку");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("[") && body.endsWith("]"),
+                "Ожидается JSON-массив");
+
+        List<Movie> movies = gson.fromJson(body, new ListOfMoviesTypeToken().getType());
+
+        assertEquals(2, movies.size(),
+                "Должны вернуться только фильмы указанного года");
+
+        assertEquals("Хакеры", movies.get(0).getTitle(),
+                "Первым должен быть фильм 1995 года");
+        assertEquals(1995, movies.get(0).getYear(),
+                "Год первого фильма должен быть 1995");
+
+        assertEquals("Схватка", movies.get(1).getTitle(),
+                "Вторым должен быть фильм 1995 года");
+        assertEquals(1995, movies.get(1).getYear(),
+                "Год второго фильма должен быть 1995");
+    }
+
+    @Test
+    void getMovies_whenYearQueryIsNotNumber_returnsBadRequest() throws Exception {
+        store.addMovie("Хакеры", 1995);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies?year=abc"))
+                .GET()
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(400, response.statusCode(),
+                "GET /movies?year=abc должен вернуть 400");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Ответ с ошибкой должен быть в формате JSON");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject errorResponse = JsonParser.parseString(body).getAsJsonObject();
+
+        assertEquals("Некорректный год", errorResponse.get("error").getAsString(),
+                "Поле error должно содержать сообщение о некорректном годе");
+    }
+
+    @Test
+    void movies_whenMethodIsNotSupported_returnsMethodNotAllowed() throws Exception {
+        String requestBody = """
+            {
+              "title": "Метрополис",
+              "year": 1927
+            }
+            """;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies"))
+                .method("PUT", HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(405, response.statusCode(),
+                "Неподдерживаемый метод должен вернуть 405");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Ответ с ошибкой должен быть в формате JSON");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject errorResponse = JsonParser.parseString(body).getAsJsonObject();
+
+        assertEquals("Метод не поддерживается", errorResponse.get("error").getAsString(),
+                "Поле error должно содержать сообщение о неподдерживаемом методе");
+    }
+
+    @Test
+    void postMovies_whenJsonIsMalformed_returnsBadRequest() throws Exception {
+        String requestBody = """
+            {
+              "title": "Метрополис",
+              "year": 1927
+            """;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE + "/movies"))
+                .header("Content-Type", "application/json; charset=UTF-8")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                .timeout(Duration.ofSeconds(2))
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        assertEquals(400, response.statusCode(),
+                "POST /movies с некорректным JSON должен вернуть 400");
+
+        String contentTypeHeaderValue =
+                response.headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json; charset=UTF-8", contentTypeHeaderValue,
+                "Ответ с ошибкой должен быть в формате JSON");
+
+        String body = response.body().trim();
+        assertTrue(body.startsWith("{") && body.endsWith("}"),
+                "Ожидается JSON-объект");
+
+        JsonObject errorResponse = JsonParser.parseString(body).getAsJsonObject();
+
+        assertEquals("Некорректный JSON", errorResponse.get("error").getAsString(),
+                "Поле error должно содержать сообщение о некорректном JSON");
+
+        assertEquals(0, store.getAllMovies().size(),
+                "Фильм не должен добавиться в хранилище");
     }
 }

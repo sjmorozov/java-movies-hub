@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import com.google.gson.JsonSyntaxException;
 
 class MoviesHandler extends BaseHttpHandler {
 
@@ -25,6 +26,8 @@ class MoviesHandler extends BaseHttpHandler {
     private static final int STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
     private static final int STATUS_NOT_FOUND = 404;
     private static final int STATUS_BAD_REQUEST = 400;
+    private static final int STATUS_NO_CONTENT = 204;
+    private static final int STATUS_METHOD_NOT_ALLOWED = 405;
 
     private static final String MOVIE_NOT_FOUND_ERROR = "Фильм не найден";
     private static final int MIN_YEAR = 1888;
@@ -38,6 +41,9 @@ class MoviesHandler extends BaseHttpHandler {
     private static final String UNSUPPORTED_MEDIA_TYPE_ERROR = "Неподдерживаемый тип содержимого";
     private static final String UNSUPPORTED_MEDIA_TYPE_DETAIL = "Ожидается Content-Type: application/json";
     private static final String INVALID_MOVIE_ID_ERROR = "Некорректный id фильма";
+    private static final String INVALID_YEAR_ERROR = "Некорректный год";
+    private static final String METHOD_NOT_ALLOWED_ERROR = "Метод не поддерживается";
+    private static final String INVALID_JSON_ERROR = "Некорректный JSON";
 
     private final Gson gson = new Gson();
 
@@ -70,7 +76,15 @@ class MoviesHandler extends BaseHttpHandler {
                     requestBody = new String(requestBytes, StandardCharsets.UTF_8);
                 }
 
-                CreateMovieRequest createMovieRequest = gson.fromJson(requestBody, CreateMovieRequest.class);
+                CreateMovieRequest createMovieRequest;
+
+                try {
+                    createMovieRequest = gson.fromJson(requestBody, CreateMovieRequest.class);
+                } catch (JsonSyntaxException e) {
+                    ErrorResponse errorResponse = new ErrorResponse(INVALID_JSON_ERROR, List.of());
+                    sendJson(ex, STATUS_BAD_REQUEST, gson.toJson(errorResponse));
+                    break;
+                }
 
                 List<String> validationDetails = validateCreateMovieRequest(createMovieRequest);
                 if (!validationDetails.isEmpty()) {
@@ -82,6 +96,17 @@ class MoviesHandler extends BaseHttpHandler {
                 Movie createdMovie = store.addMovie(createMovieRequest.getTitle(), createMovieRequest.getYear());
                 String createdMovieJson = gson.toJson(createdMovie);
                 sendJson(ex, STATUS_CREATED, createdMovieJson);
+                break;
+            }
+            case "DELETE": {
+                handleDelete(ex);
+                break;
+            }
+            default: {
+                ex.getResponseHeaders().set("Allow", "GET, POST, DELETE");
+
+                ErrorResponse errorResponse = new ErrorResponse(METHOD_NOT_ALLOWED_ERROR, List.of());
+                sendJson(ex, STATUS_METHOD_NOT_ALLOWED, gson.toJson(errorResponse));
                 break;
             }
         }
@@ -123,9 +148,30 @@ class MoviesHandler extends BaseHttpHandler {
         String path = ex.getRequestURI().getPath();
 
         if ("/movies".equals(path)) {
-            String moviesJson = gson.toJson(store.getAllMovies());
-            sendJson(ex, STATUS_OK, moviesJson);
-            return;
+            String query = ex.getRequestURI().getQuery();
+
+            if (query == null) {
+                String moviesJson = gson.toJson(store.getAllMovies());
+                sendJson(ex, STATUS_OK, moviesJson);
+                return;
+            }
+
+            if (query.startsWith("year=")) {
+                String yearText = query.substring("year=".length());
+
+                int year;
+                try {
+                    year = Integer.parseInt(yearText);
+                } catch (NumberFormatException e) {
+                    ErrorResponse errorResponse = new ErrorResponse(INVALID_YEAR_ERROR, List.of());
+                    sendJson(ex, STATUS_BAD_REQUEST, gson.toJson(errorResponse));
+                    return;
+                }
+
+                String moviesJson = gson.toJson(store.getMoviesByYear(year));
+                sendJson(ex, STATUS_OK, moviesJson);
+                return;
+            }
         }
 
         if (path.startsWith("/movies/")) {
@@ -151,5 +197,36 @@ class MoviesHandler extends BaseHttpHandler {
             String movieJson = gson.toJson(movie);
             sendJson(ex, STATUS_OK, movieJson);
         }
+    }
+
+    private void handleDelete(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+
+        if (!path.startsWith("/movies/")) {
+            ErrorResponse errorResponse = new ErrorResponse(MOVIE_NOT_FOUND_ERROR, List.of());
+            sendJson(ex, STATUS_NOT_FOUND, gson.toJson(errorResponse));
+            return;
+        }
+
+        String idText = path.substring("/movies/".length());
+
+        int movieId;
+        try {
+            movieId = Integer.parseInt(idText);
+        } catch (NumberFormatException e) {
+            ErrorResponse errorResponse = new ErrorResponse(INVALID_MOVIE_ID_ERROR, List.of());
+            sendJson(ex, STATUS_BAD_REQUEST, gson.toJson(errorResponse));
+            return;
+        }
+
+        boolean deleted = store.deleteMovieById(movieId);
+
+        if (!deleted) {
+            ErrorResponse errorResponse = new ErrorResponse(MOVIE_NOT_FOUND_ERROR, List.of());
+            sendJson(ex, STATUS_NOT_FOUND, gson.toJson(errorResponse));
+            return;
+        }
+
+        sendNoContent(ex);
     }
 }
