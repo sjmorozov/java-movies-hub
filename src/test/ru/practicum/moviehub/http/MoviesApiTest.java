@@ -449,12 +449,10 @@ public class MoviesApiTest {
     }
 
     private String movieRequestJson(String title, int year) {
-        return String.format("""
-                {
-                  "title": "%s",
-                  "year": %d
-                }
-                """, title, year);
+        return ("{\n"
+                + "  \"title\": \"%s\",\n"
+                + "  \"year\": %d\n"
+                + "}").formatted(title, year);
     }
 
     private void assertJsonContentType(HttpResponse<String> response) {
