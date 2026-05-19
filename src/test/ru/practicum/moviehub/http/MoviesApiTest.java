@@ -267,11 +267,9 @@ public class MoviesApiTest {
 
     @Test
     void postMovies_whenJsonIsMalformed_returnsBadRequest() throws Exception {
-        String requestBody = """
-                {
-                  "title": "Метрополис",
-                  "year": 1927
-                """;
+        String requestBody = "{\n"
+                + "  \"title\": \"Метрополис\",\n"
+                + "  \"year\": 1927\n";
 
         HttpResponse<String> response = sendPost("/movies", requestBody);
 
@@ -312,11 +310,9 @@ public class MoviesApiTest {
 
     @Test
     void postMovies_whenYearIsMissing_returnsValidationError() throws Exception {
-        String requestBody = """
-                {
-                  "title": "Метрополис"
-                }
-                """;
+        String requestBody = "{\n"
+                + "  \"title\": \"Метрополис\"\n"
+                + "}";
 
         HttpResponse<String> response = sendPost("/movies", requestBody);
 
