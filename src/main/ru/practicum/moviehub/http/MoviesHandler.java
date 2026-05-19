@@ -1,6 +1,7 @@
 package ru.practicum.moviehub.http;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import ru.practicum.moviehub.api.CreateMovieRequest;
@@ -14,7 +15,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import com.google.gson.JsonSyntaxException;
 
 class MoviesHandler extends BaseHttpHandler {
 
@@ -26,7 +26,6 @@ class MoviesHandler extends BaseHttpHandler {
     private static final int STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
     private static final int STATUS_NOT_FOUND = 404;
     private static final int STATUS_BAD_REQUEST = 400;
-    private static final int STATUS_NO_CONTENT = 204;
     private static final int STATUS_METHOD_NOT_ALLOWED = 405;
 
     private static final String MOVIE_NOT_FOUND_ERROR = "Фильм не найден";
@@ -44,6 +43,8 @@ class MoviesHandler extends BaseHttpHandler {
     private static final String INVALID_YEAR_ERROR = "Некорректный год";
     private static final String METHOD_NOT_ALLOWED_ERROR = "Метод не поддерживается";
     private static final String INVALID_JSON_ERROR = "Некорректный JSON";
+    private static final String RESOURCE_NOT_FOUND_ERROR = "Ресурс не найден";
+    private static final String INVALID_QUERY_ERROR = "Некорректный параметр запроса";
 
     private final Gson gson = new Gson();
 
@@ -63,6 +64,14 @@ class MoviesHandler extends BaseHttpHandler {
             }
 
             case "POST": {
+                String path = ex.getRequestURI().getPath();
+
+                if (!isMoviesCollectionPath(path)) {
+                    ErrorResponse errorResponse = new ErrorResponse(RESOURCE_NOT_FOUND_ERROR, List.of());
+                    sendJson(ex, STATUS_NOT_FOUND, gson.toJson(errorResponse));
+                    break;
+                }
+
                 if (!isJsonContentType(ex)) {
                     ErrorResponse errorResponse = new ErrorResponse(UNSUPPORTED_MEDIA_TYPE_ERROR, List.of(UNSUPPORTED_MEDIA_TYPE_DETAIL));
                     sendJson(ex, STATUS_UNSUPPORTED_MEDIA_TYPE, gson.toJson(errorResponse));
@@ -93,7 +102,8 @@ class MoviesHandler extends BaseHttpHandler {
                     break;
                 }
 
-                Movie createdMovie = store.addMovie(createMovieRequest.getTitle(), createMovieRequest.getYear());
+                String normalizedTitle = normalizeTitle(createMovieRequest.getTitle());
+                Movie createdMovie = store.addMovie(normalizedTitle, createMovieRequest.getYear());
                 String createdMovieJson = gson.toJson(createdMovie);
                 sendJson(ex, STATUS_CREATED, createdMovieJson);
                 break;
@@ -118,13 +128,20 @@ class MoviesHandler extends BaseHttpHandler {
             details.add(NULL_REQUEST);
             return details;
         }
+
         String title = request.getTitle();
         Integer year = request.getYear();
 
-        if (title == null || title.isBlank()) {
+        if (title == null) {
             details.add(EMPTY_TITLE_DETAIL);
-        } else if (title.length() > 100) {
-            details.add(TOO_LONG_TITLE);
+        } else {
+            String normalizedTitle = normalizeTitle(title);
+
+            if (normalizedTitle.isBlank()) {
+                details.add(EMPTY_TITLE_DETAIL);
+            } else if (normalizedTitle.length() > 100) {
+                details.add(TOO_LONG_TITLE);
+            }
         }
 
         if (year == null) {
@@ -147,7 +164,7 @@ class MoviesHandler extends BaseHttpHandler {
     private void handleGet(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
 
-        if ("/movies".equals(path)) {
+        if (isMoviesCollectionPath(path)) {
             String query = ex.getRequestURI().getQuery();
 
             if (query == null) {
@@ -172,6 +189,10 @@ class MoviesHandler extends BaseHttpHandler {
                 sendJson(ex, STATUS_OK, moviesJson);
                 return;
             }
+
+            ErrorResponse errorResponse = new ErrorResponse(INVALID_QUERY_ERROR, List.of());
+            sendJson(ex, STATUS_BAD_REQUEST, gson.toJson(errorResponse));
+            return;
         }
 
         if (path.startsWith("/movies/")) {
@@ -196,7 +217,11 @@ class MoviesHandler extends BaseHttpHandler {
 
             String movieJson = gson.toJson(movie);
             sendJson(ex, STATUS_OK, movieJson);
+            return;
         }
+
+        ErrorResponse errorResponse = new ErrorResponse(RESOURCE_NOT_FOUND_ERROR, List.of());
+        sendJson(ex, STATUS_NOT_FOUND, gson.toJson(errorResponse));
     }
 
     private void handleDelete(HttpExchange ex) throws IOException {
@@ -228,5 +253,13 @@ class MoviesHandler extends BaseHttpHandler {
         }
 
         sendNoContent(ex);
+    }
+
+    private boolean isMoviesCollectionPath(String path) {
+        return "/movies".equals(path) || "/movies/".equals(path);
+    }
+
+    private String normalizeTitle(String title) {
+        return title.trim();
     }
 }
