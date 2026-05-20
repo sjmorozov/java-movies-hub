@@ -395,6 +395,39 @@ public class MoviesApiTest {
         assertMovie(movie, 1, "А".repeat(99), 1927);
     }
 
+    @Test
+    void getMovies_whenYearQueryHasUnsupportedExtraParameter_returnsBadRequest() throws Exception {
+        HttpResponse<String> response = sendGet("/movies?year=1995&sort=asc");
+
+        assertErrorResponse(response, 400, "Некорректный параметр запроса");
+    }
+
+    @Test
+    void getMovieById_whenPathHasTrailingSlash_returnsMovie() throws Exception {
+        store.addMovie("Метрополис", 1927);
+
+        HttpResponse<String> response = sendGet("/movies/1/");
+
+        assertEquals(200, response.statusCode(),
+                "GET /movies/{id}/ для существующего фильма должен вернуть 200");
+
+        JsonObject movie = assertJsonObjectResponse(response);
+
+        assertMovie(movie, 1, "Метрополис", 1927);
+    }
+
+    @Test
+    void deleteMovieById_whenPathHasTrailingSlash_returnsNoContent() throws Exception {
+        store.addMovie("Метрополис", 1927);
+
+        HttpResponse<String> response = sendDelete("/movies/1/");
+
+        assertEquals(204, response.statusCode(),
+                "DELETE /movies/{id}/ для существующего фильма должен вернуть 204");
+        assertEquals(0, store.getAllMovies().size(),
+                "Фильм должен быть удалён из хранилища");
+    }
+
     private HttpResponse<String> sendGet(String path) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE + path))
